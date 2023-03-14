@@ -1,0 +1,476 @@
+---
+title: "STAT 5310 Final Project"
+author: "Group 10"
+date: "12/8/2022"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+## Introduction
+
+Concrete is the most important material in civil engineering. It has revolutionized the way construction is being carried out in the last century. The ability to make concrete into any shape and size has led to the many intriguing structures.
+The characteristics of concrete are dependent on the materials it is made up of and the proportions of the materials.  The main materials that make up concrete are water, cement, and aggregates of varying proportions. The composition of these materials determine its compressive strength (Chopra et al., 2014).
+
+The compressive strength of concrete refers to its ability to carry the load on its surface without any crack or deflection. Compressive strength of concrete is used to determine its quality and it is the most important concrete property. Therefore, the ability to predict concrete compression strength is of immense importance. The required compression strength of concrete can vary from 17 MPa for residential purposes to 70 MPa for some commercial con
+
+In this study, multiple regression analysis was carried out for predicting compression strength of concrete using eight variables cement, blast furnace slag, fly ash, water, superplasticizer, coarse aggregate, fine aggregate, and age. The performance of the developed model was tested using test data.
+
+We then wanted to understand if given the ingredients of concrete, could we accurately predict if the resultant strength of that concrete would meet industry standards (4000 PSI). So, we developed a logistic-regression model and assessed it's accuracy with training and testing subsets. 
+
+The data used for this project was obtained from UCI repository. https://archive.ics.uci.edu/ml/datasets/Concrete+Compressive+Strength
+
+## Import libraries 
+
+```{r setup, include=T,warning=FALSE,message=FALSE}
+library(tidyverse,warn.conflicts = F) # includes 'magrittr' for piping and 'dplyr' for munging 
+library(lubridate,warn.conflicts = F) # for munging time-series data 
+library(plotly,warn.conflicts = F) # for making ggplot visuals interactive via ggplotly()
+library(tidytext,warn.conflicts = F) # for ordering columns by value in each faceted plot 
+library(car, warn.conflicts = F) # avPlots
+library(MASS, warn.conflicts = F) # boxcox plots 
+knitr::opts_chunk$set(echo = TRUE)
+options(scipen=999) # turn off scientific notation
+```
+
+\newpage
+
+## Read Data 
+
+source: https://archive.ics.uci.edu/ml/datasets/Concrete+Compressive+Strength
+
+```{r cars,warning=F,message=F}
+df <- read_csv('concrete_data.csv')
+
+# reduce name size for visuals
+df <- df %>% 
+  rename(c('Cement' = `Cement (component 1)(kg in a m^3 mixture)`,
+           'Slag' = `Blast Furnace Slag (component 2)(kg in a m^3 mixture)`, 
+           'FlyAsh' = `Fly Ash (component 3)(kg in a m^3 mixture)`, 
+           'Water' = `Water  (component 4)(kg in a m^3 mixture)`,
+           'SuperPlast' = `Superplasticizer (component 5)(kg in a m^3 mixture)`,
+           'CourseAgg' = `Coarse Aggregate  (component 6)(kg in a m^3 mixture)`,
+           'FineAgg' = `Fine Aggregate (component 7)(kg in a m^3 mixture)`,
+           'Age' = `Age (day)`, 
+           'ConcreteStr' = `Concrete compressive strength(MPa, megapascals)`))
+
+#check duplicate data and remove 
+paste('Rows with duplicated data (raw):', sum(duplicated(df)))
+
+df <- df[!duplicated(df), ]
+paste('Rows with duplicated data after fix:', sum(duplicated(df)))
+
+#check missing data
+paste('Rows with missing data:', sum(is.na(df)))
+
+#no missing data
+paste('Dimensions of dataframe:', dim(df))
+
+# attach dataframe 
+attach(df)
+
+# inspect data 
+glimpse(df)
+
+```
+
+## EDA 
+
+Below, we plot all variables as histograms. Some preliminary observations include: 
+
+- Many samples have no slag, superplasticizer, nor fly ash, suggesting that they are unnecessary additives potentially used to strengthen concrete
+
+- Concrete strength seems right-skewed. Most samples have between 20-40 MPA in strength, yet some reach a very high level of strength 
+
+
+```{r}
+df %>% 
+  pivot_longer(cols = df %>% 
+                 colnames()) %>% 
+  ggplot() + 
+  geom_histogram(aes(value), size = .5, bins = 25) + 
+  facet_wrap(~name, scales = 'free') + 
+  theme_minimal() + 
+  theme(axis.title.y = element_blank())
+
+```
+
+Observations from independent variables plotted against concrete strength: 
+
+- all independent variables except cement do not correlate well with concrete strength 
+
+- some variables show a very wide range of concrete strength with the same value (FlyAsh = 0, for example). This may indicate interactivity between independent variables. For example, FlyAsh alone may not strengthen concrete, but when combined with Slag and Superplasticizer, it may (hypothetical example). We will dive into that further in later steps. 
+
+
+```{r,message=FALSE}
+# scatter plots, all vars against strength
+df %>% 
+  pivot_longer(cols = df %>% 
+                 dplyr::select(-c(ConcreteStr)) %>% 
+                 colnames()) %>% 
+  ggplot() + 
+  geom_point(aes(x = ConcreteStr, y = value), size = .5) + 
+  geom_smooth(aes(x = ConcreteStr, y = value),method='lm') +  
+  facet_wrap(~name, scales = 'free') + 
+  theme_minimal() + 
+  theme(axis.title.y = element_blank())
+
+```
+
+\newpage
+
+Below, we use pairs to examine multi-collinearity among independent variables. We don't see anything worth removing. 
+
+```{r}
+pairs(df[1:4])
+pairs(df[5:8])
+```
+
+
+
+\newpage
+
+## Qualitatively estimate which variables may require an interactive term with other independent variables
+
+Some of the variables like FlyAsh, SuperPlast, and Slag have a wide-range of concrete strength values when equal to 0. 
+
+Therefore, a variable like FlyAsh likely has a greater effect on other independent variables rather than on Concrete Strength directly. 
+
+We believe this emphasizes the need for interactive terms between independent variables in our model. Below, we investigate each of those three variables and how they relate to other independent variables. 
+
+```{r}
+# slag binary term 
+df %>% 
+  mutate(Slag_cat = if_else(Slag == 0, 'Zero', 'Non-Zero')) %>% 
+  pivot_longer(cols = df %>% 
+                 dplyr::select(-c('ConcreteStr')) %>% 
+                 colnames()) %>% 
+  ggplot() + 
+  geom_point(aes(x = ConcreteStr, y = value, color = Slag_cat), size = 1) + 
+  facet_wrap(~name, scales = 'free') + 
+  theme_minimal() + 
+  theme(axis.title.y = element_blank())
+
+# Slag by all x vars
+df %>% 
+  pivot_longer(cols = df %>% 
+                 dplyr::select(-c('Slag','ConcreteStr')) %>% 
+                 colnames()) %>% 
+  ggplot() + 
+  geom_point(aes(x = Slag, y = value, color = ConcreteStr), size = 2, alpha = .5) + 
+  #geom_smooth(aes(x = FlyAsh, y = value),method='lm') +  
+  facet_wrap(~name, scales = 'free') + 
+  theme_minimal() + 
+  theme(axis.title.y = element_blank()) + 
+  ggplot2::scale_color_continuous(type = 'viridis')
+
+# Plot independent vars against Concrete Str and color by FlyAsh
+df %>% 
+  mutate(FlyAsh_cat = if_else(FlyAsh == 0, 'Zero', 'Non-Zero')) %>%
+  mutate(SuperPlast_cat = if_else(SuperPlast == 0, 'Zero', 'Non-Zero')) %>% 
+  mutate(Slag_cat = if_else(Slag == 0, 'Zero', 'Non-Zero')) %>% 
+  pivot_longer(cols = df %>% 
+                 dplyr::select(-c('ConcreteStr','Slag')) %>% 
+                 colnames()) %>% 
+  ggplot() + 
+  geom_point(aes(x = ConcreteStr, y = value, color = Slag), size = 2) + 
+  facet_wrap(~name, scales = 'free') + 
+  theme_minimal() + 
+  theme(axis.title.y = element_blank())
+
+```
+
+**FlyAsh**
+
+Below, we create a binary variable that categorizes FlyAsh as zero or non-zero. We then plot all other independent variables against concrete strength, and color the points by our engineered variable FlyAsh_cat (binary: zero, or non-zero). 
+
+When interpretting each plot, start at the Y-axis and read across from left-to-right. If the color changes, then it may indicate an effect that FlyAsh has on Concrete Strength for a fixed quantity of the other independent variable. 
+
+Using this methodology, in later steps we will investigate potential interactive terms between FlyAsh and Age and FlyAsh and Water.
+
+```{r}
+df %>% 
+  mutate(FlyAsh_cat = if_else(FlyAsh == 0, 'Zero', 'Non-Zero')) %>%
+  mutate(SuperPlast_cat = if_else(SuperPlast == 0, 'Zero', 'Non-Zero')) %>% 
+  mutate(Slag_cat = if_else(Slag == 0, 'Zero', 'Non-Zero')) %>% 
+  pivot_longer(cols = df %>% 
+                 dplyr::select(-c('ConcreteStr')) %>% 
+                 colnames()) %>% 
+  ggplot() + 
+  geom_point(aes(x = ConcreteStr, y = value, color = FlyAsh_cat), size = 1) + 
+  facet_wrap(~name, scales = 'free') + 
+  theme_minimal() + 
+  theme(axis.title.y = element_blank())
+
+# Plot independent vars against Concrete Str and color by FlyAsh
+df %>% 
+  mutate(FlyAsh_cat = if_else(FlyAsh == 0, 'Zero', 'Non-Zero')) %>%
+  mutate(SuperPlast_cat = if_else(SuperPlast == 0, 'Zero', 'Non-Zero')) %>% 
+  mutate(Slag_cat = if_else(Slag == 0, 'Zero', 'Non-Zero')) %>% 
+  pivot_longer(cols = df %>% 
+                 dplyr::select(-c('ConcreteStr','FlyAsh')) %>% 
+                 colnames()) %>% 
+  ggplot() + 
+  geom_point(aes(x = ConcreteStr, y = value, color = FlyAsh), size = 2) + 
+  facet_wrap(~name, scales = 'free') + 
+  theme_minimal() + 
+  theme(axis.title.y = element_blank())
+
+```
+
+
+**SuperPlast** 
+
+```{r}
+
+df %>% 
+  mutate(FlyAsh_cat = if_else(FlyAsh == 0, 'Zero', 'Non-Zero')) %>%
+  mutate(SuperPlast_cat = if_else(SuperPlast == 0, 'Zero', 'Non-Zero')) %>% 
+  mutate(Slag_cat = if_else(Slag == 0, 'Zero', 'Non-Zero')) %>% 
+  pivot_longer(cols = df %>% 
+                 dplyr::select(-c('ConcreteStr')) %>% 
+                 colnames()) %>% 
+  ggplot() + 
+  geom_point(aes(x = ConcreteStr, y = value, color = SuperPlast_cat), size = 1) + 
+  facet_wrap(~name, scales = 'free') + 
+  theme_minimal() + 
+  theme(axis.title.y = element_blank())
+
+```
+
+
+\newpage
+
+## Developing initial model
+
+In our first model, we have no interactive terms. Adjusted R^2 is roughly .6.
+
+```{r}
+model0 <- lm(ConcreteStr ~ Cement + Slag + FlyAsh + Water + SuperPlast + CourseAgg + FineAgg + Age)
+summary(model0)
+```
+
+\newpage
+
+## Added variable plots to assess each independent variable
+
+All the variables have significant p-values except coarse aggregate and fine aggregate. Also, from the added variable plot these two variables are not significant in estimating the concrete compression strength as their slopes are almost zero. 
+
+The slope for superplasticity is also almost 0, but the visuals above suggest superplasticity has an impact on other independent variables. Therefore, we will keep it and explore adding it in interactive terms with other independent variables. 
+
+```{r}
+avPlots(model0)
+```
+
+\newpage
+
+## Optimizing our model by removing terms and adding interactivity terms
+
+
+Next, we'll remove CourseAgg and FineAgg then add in some interactive terms estimated from the visual relationship between dependent variables in the above steps. 
+
+```{r}
+model1 <- lm(ConcreteStr ~ Cement + Slag + FlyAsh + Water + SuperPlast + Age + 
+               FlyAsh:Age + Slag:Age +  SuperPlast:Age + SuperPlast:Slag + SuperPlast:CourseAgg)
+summary(model1)
+```
+
+
+\newpage
+
+## Model diagnostics 
+
+Based on the diagnostic plots, the model seems reasonable. 
+
+```{r}
+par(mfrow = c(2,2))
+plot(model1)
+plot(model1$fitted.values, ConcreteStr)
+par(mfrow = c(2,5))
+rstand <- rstandard(model1)
+plot(rstand ~ Cement)
+plot(rstand ~ Slag)
+plot(rstand ~ FlyAsh)
+plot(rstand ~ Water)
+plot(rstand ~ SuperPlast)
+plot(rstand ~ Age)
+plot(rstand ~ FlyAsh:Age)
+plot(rstand ~ SuperPlast:Age)
+plot(rstand ~ Slag:SuperPlast)
+plot(rstand ~ model1$fitted.values) # fitted v standard resid 
+plot(ConcreteStr~ model1$fitted.values) # fitted v actual
+abline(lm(ConcreteStr ~ model1$fitted.values))
+```
+
+
+\newpage
+
+Based on the inverse response plot and boxcox plot, no transformation seems necessary for the independent variable. 
+
+
+```{r}
+inverseResponsePlot(model1)
+boxcox(model1, lambda = seq(  0,1,by =0.01))
+avPlots(model1)
+```
+
+
+
+\newpage
+
+Based on the marginal model plots, our model fits well. Specifically, the 'data' and 'model' lines trace closely for the different variables. 
+
+```{r,warning=FALSE,message=FALSE}
+#marginal model plot
+mmps(model1,layout=c(2,2))
+```
+
+\newpage
+
+To demonstrate the impact of these interactive terms, we will perform an anova test between full and partial models. 
+
+The low p-value after excluding the interactive term between SuperPlast:CourseAgg is well-below any reasonable alpha-value, indicating that it is significant to the model. 
+
+```{r}
+model1_partial <- lm(ConcreteStr ~ Cement + Slag + FlyAsh + Water + SuperPlast + Age +
+                       FlyAsh:Age + Slag:Age +  SuperPlast:Age + SuperPlast:Slag) # Removed SuperPlast:CourseAgg
+
+anova(model1_partial, model1)
+```
+
+
+
+## Next, we create a logistic regression model to determine if concrete components produce concrete stronger than industry standard (4000 PSI). We then assess our model accuracy using a test sample. 
+
+Compressive strength is important as it is the main criteria used to determine whether a given concrete mixture will meet the needs of a specific job. The threshold for compressive strength of a concrete pass is 4000 psi = 27.58 Mpa.
+
+https://cor-tuf.com/everything-you-need-to-know-about-concrete-strength/
+
+## Creating a binary variable column for  concrete strength using the threshold. Samples with strength higher than the threshold are assigned 1 (pass) while the opposite is assigned 0 (fail) based on the parameters that we have. 
+
+```{r}
+threshold <- 27.58 #4000 psi to MPA
+
+ 
+df_expanded <- df %>% 
+
+  # create binary variable above or below the concrete strength threshold  
+  mutate(Binary_ConcreteStr = ifelse(ConcreteStr>threshold,1,0)) %>% 
+  
+  # create a unique identifier to split the train-test sets using anti-join 
+  mutate(rownumber = row_number()) 
+
+# inspect contents
+head(df_expanded)
+
+# split 80% of df_expanded into train set 
+df_train <- sample_frac(df_expanded, size = 0.8)
+
+# create test set using 25% of df_expanded not in train set 
+df_test <- df_expanded %>% anti_join(df_train, by = 'rownumber')
+```
+
+
+\newpage
+
+## Modeling the new dataset using logistic regression: 
+
+```{r,message=FALSE,warning=FALSE}
+# create model using the training dataset, 
+# prevent information leakage by excluding the testing dataset 
+model1_log <- glm(Binary_ConcreteStr ~ Cement + Slag + FlyAsh + Water + SuperPlast + 
+                    
+Age + FlyAsh:Age + Slag:Age +  SuperPlast:Age + SuperPlast:Slag +SuperPlast:CourseAgg, 
+                  
+data = df_train, family = binomial)
+
+summary(model1_log)
+```
+
+\newpage
+
+## Computing a generalized version of the R^2 for logistic regression model:
+
+```{r}
+D <- 555.78
+Do <- 1297.93
+R_square <- 1 - (D/Do)
+print(paste("The R^2 vaue is ",round(R_square,2)))
+```
+## Alternative for calculating R^2 confirms similar value 
+
+```{r}
+library(class) # import for knn function 
+temp <- class::knn(train = df_train, test = df_test, cl = df_train$Binary_ConcreteStr)
+print(paste('The alternative R^2 value is close at:',
+round(sum(as.integer(temp)-1)/length(temp),2)))
+```
+
+\newpage
+
+## In the broader dataset, computing samples with concrete strength above the threshold: 
+
+```{r}
+concrete_passed_data <- length(which(df_expanded$Binary_ConcreteStr == 1))
+
+print(paste(round(concrete_passed_data), 
+            "concrete samples passed the threshold of 4000 psi (27.58 MPa)"))
+```
+
+## Computing how many samples have concrete strength that passes the threshold in the test dataset:
+
+```{r}
+concrete_passed_model <- predict(model1_log, df_test, type = "response")
+
+count_concrete_passed_model <- length(which(concrete_passed_model > 0.5))
+
+print(paste("The model predicted that",round(count_concrete_passed_model),
+            "concrete samples passed the threshold of 4000 psi (27.58 MPa)"))
+```
+
+## Model accuracy 
+
+```{r}
+fit_passed.pred <- rep("Didn't Pass", nrow(df_test))
+
+fit_passed.pred[concrete_passed_model > 0.5] = "Passed"
+
+confusion <- table(fit_passed.pred, df_test$Binary_ConcreteStr)
+
+print(confusion)
+
+accurancy <- round((c(confusion)[1] + c(confusion)[4])/(sum(c(confusion)))*100,0)
+
+print(paste("The training accuracy of the model is",accurancy,"%"))
+```
+
+\newpage
+
+## Summary
+
+Problem statement and how we addressed it:  
+
+We wanted to understand if given the ingredients of concrete, could we accurately predict if the resultant compressive strength of that concrete would meet industry standards (4000 PSI). 
+
+First, we performed EDA to refine a multi-linear regression model. Then, we took our model and our engineered term of above or below 4000 PSI to train a subset of our data and assess the accuracy against a testing subset. 
+
+Our final model came out at 87% accurate. Below, you can find our interpretation of this value. 
+
+Interesting insights and limitations: 
+
+1) Some variables of concrete are not 'necessary’ but are rather additives that can strengthen concrete by enhancing the effects of more primary ingredients like cement.  These types of elements (like Superplasticity, Slag, and Fly Ash) have strong interactivity with other concrete ingredients to improve the overall strength. Once we added interactive terms to our multi-linear regression for these ancillary ingredients with more primary ingredients, the model R2 value improved by 15% 
+
+2) Some variables have a direct effect on the strength of concrete without any interactive term (or added ingredients). For example, cement content correlates closely with concrete compressive strength. This is evident in the low p-value from the model summary, and a simple scatter plot between the two variables. 
+
+3) Our logistic regression model had an accuracy of 87%. In other words, if someone has the ingredients to make concrete and plugs those values into our model, our model will predict whether the resultant compressive strength is above or below 4000 PSI. 87% of the time, our model will accurately predict if the concrete strength is above or below that threshold. These types of logistic regression models are likely widely used in the real-world. If concrete unexpectedly fails, the consequences can be severe.
+
+4) While decent, our model could likely be improved. We estimate that more time would be needed to determine exact interactive terms between variables. In this model, we managed to capture a few obvious ones from some of our diagnostic plots and EDA. Given how those interactive terms improved our model accuracy, more refined ones may further improve this model.
+
+
+## References
+
+Chopra, P., Sharma, R.K. and Kumar, M. (2014) “Predicting compressive strength of concrete for varying workability using regression models,” International Journal Of Engineering &amp; Applied Sciences, 6(4), pp. 10–10. Available at: https://doi.org/10.24107/ijeas.251233.
+
+Peng, X., Zhuang, Z. and Yang, Q. (2022) “Predictive modeling of compressive strength for concrete at super early age,” Materials, 15(14), p. 4914. Available at: https://doi.org/10.3390/ma15144914. 
+
+
