@@ -1,0 +1,383 @@
+---
+title: "Performance Task For HISD"
+author: "Ndubuisi Chibuogwu"
+date: "2024-04-13"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Objective
+
+To independently explore the provided data files, which include students' performance on STAAR EOC for Algebra I and student demographic information. Merge the data sets, perform an exploratory analysis, and communicate my findings via PowerPoint slides. This assignment aims to evaluate my proficiency in data cleaning, analysis, and visualization techniques.
+
+```{r}
+# Load necessary packages
+library(readxl)
+library(dplyr)
+library(tidyverse)
+library(tidyr)
+library(purrr)
+library(ggplot2)
+library(scales)
+library(GGally)
+library(latexpdf)
+```
+
+## Importing of the data file
+
+
+
+```{r, echo=FALSE}
+# Importing data set from working directory
+Combined <- read_excel("Combined.xlsx") # Importing data set from working directory
+
+attach(Combined) # Allows for direct use of column names
+```
+
+## Exploratory Data Analysis
+
+
+```{r, echo=FALSE}
+# Exploratory Data Analysis
+# Verify that the data has been loaded correctly
+  View(Combined)
+
+# Inspecting numbers of rows and columns
+  dim(Combined)  # 20 Columns & 236 rows
+
+# Quick understanding of the structure and content of data set 
+  str(Combined) 
+
+# Quick overview of the characteristics of the data set 
+  summary(Combined) 
+
+```
+
+## Data Cleaning & Preprocessing
+
+```{r, echo=FALSE}
+# Data Cleaning and Pre-processing
+  
+# Checking column names 
+  colnames(Combined)
+  
+# Checking for NAs
+# Sum of NAs in data set
+  sum(is.na(Combined)) # There are a total of 238 NAs
+  
+# Counting the number of NAs in each columns
+  colSums(is.na(Combined)) 
+  Fields_with_NAs <- names(Combined)[colSums(is.na(Combined)) > 0]
+  print(Fields_with_NAs) # Raw_Score & Scale_Score = 2, BLANK = 236
+
+# Remove rows with NA values 
+  nrow(Combined)
+
+# Only one row affected in Raw_Score & Scale_Score Columns (23)
+  Combined <- Combined[-23, ]
+  nrow(Combined)
+
+# 236 rows affected in Column = BLANK16 and are not significant 
+  colSums(is.na(Combined)) 
+  Fields_with_NAs <- names(Combined)[colSums(is.na(Combined)) > 0]
+  print(Fields_with_NAs)
+  
+# Delete Column(s) that are not required for our analysis ***BLANK16
+  Combined <- Combined[, -c(8:10, 15)]
+  view(Combined)
+  length(Combined)
+  colnames(Combined)
+  
+# Change the column name using the assignment operator
+  names(Combined)[names(Combined) == "Date_of_Birth (MMDDYYYY)"] <- "Birthdate"
+  colnames(Combined)
+  
+# Rearrange the digits to MMDDYYYY format
+  mmddyyyy_dates <- sprintf("%08d", Combined$Birthdate)
+  
+# Convert rearranged dates to Date objects
+  Combined$Birthdate <- as.Date(mmddyyyy_dates, format = "%m%d%Y")
+  print(Combined$Birthdate)
+
+```
+
+## Correlation Analysis
+
+```{r, echo=FALSE}
+# Scatter plot matrix
+  scatterplot_matrix <- ggpairs(data = Combined, 
+                                columns = c("Economically_Disadvantaged_Code", 
+                                            "Approach_Grade_Level", 
+                                            "Meets_Grade_Level", 
+                                            "Masters_Grade_Level", 
+                                            "Scale_Score",
+                                            "Raw_Score"),
+                                title = "Scatter Plot Matrix of Numerical Variables")
+  
+  print(scatterplot_matrix)
+  
+# Calculate correlation matrix
+  correlation_matrix <- cor(Combined[c("Economically_Disadvantaged_Code", 
+                            "Approach_Grade_Level", "Meets_Grade_Level", 
+                            "Masters_Grade_Level", "Scale_Score", "Raw_Score")])
+  
+ # Display correlation matrix
+  View(print(correlation_matrix))
+```
+
+## Data Analysis & Visualization
+
+```{r, echo=FALSE}
+  
+# Set theme options for ggplot
+  theme_set(theme_minimal())
+
+# Scale Score Distribution by Gender - Boxplot  
+    ggplot(data = Combined, 
+           aes(x = Sex_Code, 
+           y = Scale_Score, fill = Sex_Code)) +
+           geom_boxplot() +
+           labs(title = "Scale Score Distribution by Gender",
+           x = "Gender", y = "Scale Score") +
+           theme(legend.position = "top")
+
+# Effects Economic Disadvantages Has on Scale Score
+    ggplot(data = Combined %>% filter(Economically_Disadvantaged_Code %in% c(0, 1)), 
+           aes(x = factor(Economically_Disadvantaged_Code), 
+           y = Scale_Score, 
+           fill = factor(Economically_Disadvantaged_Code))) +
+           geom_boxplot() +
+           labs(title = "Scale Score by Economic Disadvantage",
+           x = "Economic Disadvantage",
+           y = "Scale Score") +
+           theme(legend.position = "top")
+  
+```
+Male and female students have similar median scale scores. However, females show a slightly wider interquartile range, indicating greater variability in their scores. Poor students tend to have lower median scores compared to their non-disadvantaged peers, highlighting a potential achievement gap
+
+##                      Demographic Effects on Academic Performance
+```{r, echo=FALSE}
+# Approach Grade Level by Ethnicity
+# Count of Students that returned a 1 in Approach_Grade Level  
+    Approach_only <- Combined %>%
+    filter(Approach_Grade_Level == 1 & 
+             Meets_Grade_Level == 0 & 
+             Masters_Grade_Level == 0)
+
+# Count the number of students meeting the criteria for each ethnicity  
+    Approach_only_counts <- Approach_only %>%
+            group_by(Ethnicity_Race_Category) %>%
+            summarise(Count = n())
+    
+# Define custom colors for each ethnicity
+    ethnicity_colors <- c("H" = "green", "B" = "skyblue", "I" = "red")
+    
+# Create the plot
+    ggplot(data = Combined, 
+           aes(x = Ethnicity_Race_Category, 
+           fill = Ethnicity_Race_Category)) +
+           geom_bar(position = "dodge") +
+           geom_text(data = Approach_only_counts, aes(label = Count, y = Count), 
+           position = position_dodge(width = 0.9), vjust = -0.5) +
+           scale_fill_manual(values = ethnicity_colors) +  
+           labs(title = "Approach Grade Level by Ethnicity",
+           x = "Ethnicity", y = "Count") +
+           theme(legend.position = "top")
+    
+    ggplot(data = Combined, 
+       aes(x = Ethnicity_Race_Category, 
+           fill = Ethnicity_Race_Category)) +
+  geom_bar(position = "dodge") +
+  geom_text(data = Approach_only_counts, 
+            aes(label = Count, y = Count),
+            position = position_dodge(width = 0.9),
+            vjust = -0.5, hjust = 0.5,
+            color = "black", size = 3) +
+  scale_fill_manual(values = ethnicity_colors) +  
+  labs(title = "Approach Grade Level by Ethnicity",
+       x = "Ethnicity", y = "Count") +
+  theme(legend.position = "top")
+
+    
+# Meets Grade Level by Ethnicity
+# Count of Students that returned a 1 in two of all 3 Levels  
+  Meets_only <- Combined %>%
+    filter(Approach_Grade_Level == 1 & 
+           Meets_Grade_Level == 1 & 
+           Masters_Grade_Level == 0)
+  
+# Count the number of students
+  Meets_only_count <- nrow(Meets_only)
+  
+# Print the count
+  print(Meets_only_count)
+   
+  ggplot(data = Combined, 
+         aes(x = Ethnicity_Race_Category, 
+         fill = factor(Meets_Grade_Level))) +
+         geom_bar(position = "dodge") +
+         geom_text(stat = "count", aes(label = ..count..), 
+         position = position_dodge(width = 0.9),
+         vjust = -0.5, hjust = 0.5, 
+         color = "black", size = 3, angle = 1) + 
+         labs(title = "Meets Grade Level by Ethnicity",
+         x = "Ethnicity", y = "Count") +
+         scale_fill_discrete(labels = c("No", "Yes")) +  
+         theme(legend.position = "top")
+
+  
+# Masters Grade Level by Ethnicity
+# Count of Students that have a 1 in all 3 Levels  
+    Masters_only <- Combined %>%
+    filter(Approach_Grade_Level == 1 & 
+         Meets_Grade_Level == 1 & 
+         Masters_Grade_Level == 1)
+  
+# Count the number of students
+    Masters_only_count <- nrow(Masters_only)
+  
+# Print the count
+    print(Masters_only_count)
+  
+  ggplot(data = Combined, 
+        aes(x = Ethnicity_Race_Category, 
+        fill = factor(Masters_Grade_Level))) +
+        geom_bar(position = "dodge") +
+        geom_text(stat = "count", aes(label = ..count..), 
+        position = position_dodge(width = 0.9),
+        vjust = -0.5, hjust = 0.5, 
+        color = "black", size = 3, angle = 1) + 
+        labs(title = "Masters Grade Level by Ethnicity",
+        x = "Ethnicity", y = "Count") +
+        scale_fill_discrete(labels = c("No", "Yes")) +  
+        theme(legend.position = "top")
+
+  
+# Create a data frame with the counts
+  counts <- data.frame(
+         Category = c("Approach Only", "Meets Only", "Masters Only"),
+         Count = c(sum(Approach_only_counts$Count), Meets_only_count, Masters_only_count)
+         )
+  
+# Distribution of Students based on Performance
+  ggplot(counts, 
+         aes(x = Category, y = Count, fill = Category)) +
+         geom_bar(stat = "identity") +
+         geom_text(aes(label = Count), vjust = -0.5, hjust = 0.5, color = "black", size = 3) +  
+         labs(title = "Distribution of Students in Different Performance Categories",
+         x = "Performance Category",
+         y = "Count") +
+         theme_minimal() 
+
+# Masters Grade Level by Gender  
+   # Filter the dataset to include only students with Masters Grade Level
+         masters_students <- Combined %>%
+         filter(Masters_Grade_Level == 1)
+           
+# Plot a histogram
+         ggplot(data = masters_students, 
+         aes(x = Sex_Code, fill = Sex_Code)) +
+         geom_bar(alpha = 0.7) +
+         geom_text(stat = 'count', aes(label = ..count..), 
+         position = position_stack(vjust = 0.5), color = 'white') +
+         labs(title = "Distribution of Students with Masters Grade Level by Gender",
+         x = "Gender", y = "Frequency") +
+         scale_fill_manual(values = c("blue", "red")) +
+         theme_minimal()
+           
+```
+Meets Grade Level by Ethnicity: 
+Most students in each ethnic category did not meet the grade level, with Hispanic students having the highest number of students both meeting and not meeting the grade level. This is reflective of the predominant demographic in the data set.
+
+Masters Grade Level by Gender:
+A higher proportion of female students appear to master the grade level compared to male students, suggesting better performance at the highest achievement level.
+
+
+
+```{r, echo=FALSE}
+# Create a data frame with the counts by gender and ethnicity
+  gender_ethnicity_counts <- Combined %>%
+                             group_by(Sex_Code, Ethnicity_Race_Category) %>%
+                             summarise(Count = n()) %>%
+                             ungroup()
+  
+# Create the bar plot
+  print(ggplot(gender_ethnicity_counts, 
+         aes(x = Ethnicity_Race_Category, y = Count, fill = Sex_Code)) +
+         geom_bar(stat = "identity", position = "dodge") +
+         geom_text(aes(label = Count), 
+         position = position_dodge(width = 0.9), vjust = -0.5, color = "black") + 
+         labs(title = "Distribution of Students by Gender and Ethnicity",
+         x = "Ethnicity", y = "Count", fill = "Gender") +
+         theme_minimal()
+       )
+# Tabular count of gender based on ethnicity
+  gender_ethnicity_count <- table(Combined$Sex_Code, Combined$Ethnicity_Race_Category)
+  
+# Print the tabular count
+  print(gender_ethnicity_count)
+  
+```
+Hispanic make up over 90% of students in all the campuses in the Houston ISD, with male Hispanic students accounting for about 47% of the total population
+
+
+
+```{r eval=TRUE}
+# Filter data for students who have "Yes" (1) in all three levels
+  students_all_yes <- Combined[Combined$Approach_Grade_Level == 1 & 
+                              Combined$Meets_Grade_Level == 1 & 
+                              Combined$Masters_Grade_Level == 1, ]
+  
+# Count the number of students from each campus
+  campus_counts <- table(students_all_yes$D_CampusName)
+
+# Convert campus counts to data frame
+  campus_counts_df <- data.frame(Campus = names(campus_counts),
+                                 Students_with_All_3_Levels = as.numeric(campus_counts))
+  
+  print(view(campus_counts_df))
+
+  
+# Create bar plot
+   print(ggplot(campus_counts_df, 
+         aes(x = reorder(Campus, -Students_with_All_3_Levels), 
+         y = Students_with_All_3_Levels, fill = Campus)) +
+         geom_bar(stat = "identity") +
+         geom_text(aes(label = Students_with_All_3_Levels), vjust = -0.5, color = "black") +  
+         labs(title = "Number of Students with 'Yes' in All Three Levels by Campus",
+         x = "Campus", y = "Number of Students") +
+         theme_minimal() +
+         theme(axis.text.x = element_text(angle = 45, hjust = 1)))
+
+# Calculate average Raw_Score by campus
+  average_scores <- aggregate(Raw_Score ~ D_CampusName, data = Combined, FUN = mean)
+  average_scores <- average_scores %>%
+  mutate(Raw_Score = round(Raw_Score, 2)) %>%
+  select(D_CampusName, Raw_Score)  # Keep only the rounded numeric column and the categorical column
+  
+# View the modified data frame
+  print(view(average_scores))
+  
+# Create bar plot
+# Define custom colors for each campus
+  campus_colors <- c("Campus A" = "blue", "Campus B" = "red", "Campus C" = "green", "Campus D" = "purple")
+  
+# Bar plot with distinct coloring for different campuses
+  print(ggplot(average_scores, 
+         aes(x = reorder(D_CampusName, -Raw_Score), 
+         y = Raw_Score, fill = D_CampusName)) +
+         geom_bar(stat = "identity") +
+         geom_text(aes(label = round(Raw_Score)), vjust = -0.5, color = "black") +
+         scale_fill_manual(values = campus_colors) +  
+         labs(title = "Average Raw Score by Campus",
+         x = "Campus", y = "Average Raw Score") +
+         theme_minimal() +
+         theme(axis.text.x = element_text(angle = 45, hjust = 1)))
+
+```
